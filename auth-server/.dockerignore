@@ -1,0 +1,6 @@
+# compose 以 auth-server/ 为 build context；其他组件不在上下文内。
+.git
+.env
+/arauth
+Dockerfile
+.dockerignore

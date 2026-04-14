@@ -1,0 +1,34 @@
+# ---- 机密与环境 ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# ---- 构建与端到端测试产物 ----
+/auth-server/arauth
+/service-server/service-server
+/e2e/e2e
+/bin/
+/scripts/.e2e-bin/
+/scripts/.e2e-caddy-root.crt
+
+# ---- 通用构建产物（按技术栈增删）----
+dist/
+build/
+out/
+coverage/
+__pycache__/
+*.egg-info/
+target/
+
+# ---- 本地配置 ----
+*.local
+*.local.*
+
+# ---- 编辑器/系统噪音 ----
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

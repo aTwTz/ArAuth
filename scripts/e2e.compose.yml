@@ -1,0 +1,32 @@
+# e2e 的 compose override：与生产 docker-compose.yml 的差异只在
+# "hermetic、可重复、跑得快"三点。用法见 scripts/e2e.sh。
+services:
+  postgres:
+    # 不发布宿主端口：e2e 全程经 Caddy 访问，宿主的 5432 可能被开发库占用。
+    ports: !reset []
+
+  arauth:
+    # e2e 必须 hermetic：不依赖仓库根 .env（那是开发/生产部署的输入）。
+    # arauth 的 ARAUTH_* 改由下方 environment 注入；主 compose 已固化
+    # DSN、Secure cookie 与可信 service-server 代理头设置。
+    env_file: !reset []
+    environment:
+      ARAUTH_RPID: ${ARAUTH_RPID}
+      ARAUTH_RP_ORIGINS: ${ARAUTH_RP_ORIGINS}
+      ARAUTH_EXCHANGE_API_KEY: ${ARAUTH_EXCHANGE_API_KEY}
+      # env_file reset 后显式注入必填 TOTP 主密钥；其余 TOTP 项使用默认值。
+      ARAUTH_TOTP_ENCRYPTION_KEY: ${ARAUTH_TOTP_ENCRYPTION_KEY}
+      # 限流放宽：e2e 全链路严格档端点（pow/注册系/两种 redeem/exchange）
+      # 多次调用同源于一个 IP，默认 1/s 突发 8 会误伤。限流与自适应难度
+      # 本身有单测覆盖，e2e 考的是集成链路，不是限流。
+      ARAUTH_RATE_STRICT_RPS: "50"
+      ARAUTH_RATE_STRICT_BURST: "100"
+      ARAUTH_RATE_LENIENT_RPS: "50"
+      ARAUTH_RATE_LENIENT_BURST: "100"
+      # PoW 难度降到自适应区间下限以加速（config 校验 min ≤ 初始，同步下调）。
+      ARAUTH_POW_DIFFICULTY: "18"
+      ARAUTH_POW_MIN_DIFFICULTY: "18"
+
+  caddy:
+    # 独立高位回环端口：不抢占开发栈或宿主的 80/443，也不对外发布测试栈。
+    ports: !override ["127.0.0.1:${E2E_HTTP_PORT:-18080}:80", "127.0.0.1:${E2E_HTTPS_PORT:-18443}:443"]

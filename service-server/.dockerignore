@@ -1,0 +1,6 @@
+.git
+.env
+*.test
+/service-server
+/Dockerfile
+/.dockerignore
