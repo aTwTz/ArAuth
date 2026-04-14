@@ -1,0 +1,61 @@
+# 质量门：提交前门。
+# 安全要求：
+#   1. GITHUB_TOKEN 权限最小化——只给本工作流真正需要的 scope。
+#   2. 所有第三方 action 上线前 pin 到完整 commit SHA（在 tag 后加 @<40位SHA>），防供应链篡改。
+#   3. 不在 pull_request_target 里 checkout PR 分支代码执行；PR 分支带入的配置与
+#      工作流脚本一律视为不可信输入。
+name: quality-gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4   # TODO(owner): pin action to full commit SHA; Ref: ci-hardening; due: 2026-12-31.
+
+      - name: setup go
+        uses: actions/setup-go@v5   # TODO(owner): pin action to full commit SHA; Ref: ci-hardening; due: 2026-12-31.
+        with:
+          go-version: '1.26.x'
+          cache: true
+
+      - name: download modules
+        run: |
+          go -C auth-server mod download
+          go -C service-server mod download
+          go -C e2e mod download
+
+      - name: lint
+        run: test -z "$(gofmt -l .)"
+
+      - name: typecheck
+        run: |
+          go -C auth-server vet ./...
+          go -C service-server vet ./...
+          go -C e2e vet ./...
+
+      - name: test
+        run: |
+          go -C auth-server test ./...
+          go -C service-server test ./...
+          go -C e2e test ./...
+
+      - name: build
+        run: |
+          go -C auth-server build ./...
+          go -C service-server build ./...
+          go -C e2e build ./...
+
+# —— 可选：机密扫描（纵深防御的 CI 层；与仓库 Secret scanning + Push protection 配合使用）——
+# 在 gate 作业的 steps 里追加（上线前 pin SHA）：
+#   - name: secret scan
+#     uses: gitleaks/gitleaks-action@v2   # TODO(owner): pin action to full commit SHA; Ref: ci-hardening; due: 2026-12-31.
+#     env:
+#       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
