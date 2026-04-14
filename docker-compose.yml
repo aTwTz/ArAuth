@@ -1,0 +1,92 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?missing POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?missing POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?missing POSTGRES_DB in .env}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # 一次性迁移服务：等 postgres 健康后执行 goose up；失败则 arauth 不启动。
+  # 手动通道：docker compose run --rm migrate
+  migrate:
+    build:
+      context: ./auth-server
+      target: migrate
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["-dir", "/migrations", "postgres", "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}", "up"]
+
+  arauth:
+    build:
+      context: ./auth-server
+      target: arauth
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    env_file: .env
+    environment:
+      # 覆盖 .env 中供本机开发使用的 localhost DSN，改指 compose 内网 postgres。
+      ARAUTH_DSN: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      ARAUTH_SESSION_COOKIE_SECURE: "true"
+      # 唯一可信上游是 service-server：它重新生成单值 X-Forwarded-For。
+      # arauth 不发布宿主端口，浏览器与 Caddy 都没有直连路由。
+      ARAUTH_TRUST_PROXY_HEADERS: "true"
+    # 不发布宿主端口；仅供 service-server 经 http://arauth:8080 内网调用。
+
+  service-server:
+    build:
+      context: ./service-server
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+    restart: unless-stopped
+    depends_on:
+      - arauth
+    environment:
+      RP_ARAUTH_URL: http://arauth:8080
+      # 复用现有配置值，不为同一份秘密另设 .env 配置项。
+      RP_ID: ${ARAUTH_RPID:?missing ARAUTH_RPID in .env}
+      RP_ORIGINS: ${ARAUTH_RP_ORIGINS:?missing ARAUTH_RP_ORIGINS in .env}
+      RP_EXCHANGE_API_KEY: ${ARAUTH_EXCHANGE_API_KEY:?missing ARAUTH_EXCHANGE_API_KEY in .env}
+      # Caddy 是唯一可信公开上游；RP 的第一方 cookie 仅经 HTTPS 下发。
+      RP_TRUST_PROXY_HEADERS: "true"
+      RP_COOKIE_SECURE: "true"
+    # 不发布宿主端口；仅供 Caddy 内网反代。
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - service-server
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # 名称暂保留以兼容现有 .env；语义是公共服务域名。
+      ARAUTH_DOMAIN: ${ARAUTH_DOMAIN:?missing ARAUTH_DOMAIN in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./service-web:/srv/web:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:
