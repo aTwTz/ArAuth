@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>arauth 服务前端</title>
+<style>
+  body { max-width: 40em; margin: 2em auto; padding: 0 1em; font-family: sans-serif; line-height: 1.6; }
+  section { border: 1px solid #ccc; border-radius: 6px; padding: 1em; margin: 1em 0; }
+  button { padding: .5em 1em; cursor: pointer; }
+  button:disabled { cursor: not-allowed; opacity: .5; }
+  #status { min-height: 1.5em; color: #555; }
+  #status.error { color: #b00; }
+  code { font-size: 1.1em; word-break: break-all; }
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.85); display: flex;
+             align-items: center; justify-content: center; z-index: 10; }
+  .overlay[hidden] { display: none; }
+  .panel { background: #fff; padding: 2em; border-radius: 8px; max-width: 32em; }
+  .panel code { display: block; background: #f4f4f4; padding: 1em; border-radius: 4px;
+                margin: 1em 0; font-size: 1.3em; text-align: center; }
+  #identity-card { border: 1px solid #4a4; border-radius: 6px; padding: 1em; }
+  #identity-card dl { display: grid; grid-template-columns: auto 1fr; gap: .2em 1em; }
+  #identity-card dt { font-weight: bold; }
+  #identity-card dd { margin: 0; word-break: break-all; }
+  .note { color: #777; font-size: .9em; }
+</style>
+</head>
+<body>
+<h1>arauth 服务前端</h1>
+<p class="note">本页由同源 service-server 提供，浏览器只连接服务后端，由后端调用认证服务。
+本页不存任何秘密：localStorage 里只有"本机有凭证"与 identity→credential 两类 UX 提示。</p>
+
+<section id="register-section">
+  <h2>注册新身份</h2>
+  <p>在本机（或你的密码管理器）创建一把新密钥。注册过程中会给你一枚恢复码——<strong>只显示一次</strong>，
+  请抄在纸上并妥善保存，它可以用于找回身份。</p>
+  <button id="btn-register">创建密钥并注册</button>
+</section>
+
+<section id="register-next-section" hidden>
+  <h2>完成注册</h2>
+  <p>恢复码已确认保存。你可以现在绑定 TOTP 作为另一种找回方式，也可以跳过并直接完成注册。</p>
+  <button id="btn-totp-begin">绑定 TOTP（可选）</button>
+  <button id="btn-register-skip">跳过并完成注册</button>
+</section>
+
+<section id="login-section">
+  <h2>登录</h2>
+  <p id="hint-line" class="note"></p>
+  <button id="btn-login">使用密钥登录</button>
+</section>
+
+<section id="recovery-section">
+  <h2>找回身份</h2>
+  <p>密钥丢了（换设备且未同步）时，可使用一次性恢复码或已绑定的 TOTP 挂一把新密钥。
+  找回成功后旧恢复码随即作废，你会得到一枚新码。</p>
+  <h3>一次性恢复码</h3>
+  <p><label for="recovery-code-input">恢复码</label><br>
+    <input id="recovery-code-input" type="text" size="36" autocomplete="off"
+           placeholder="xxxx-xxxx-xxxx-xxxx-xxxx-xxxx-xx"></p>
+  <button id="btn-recover">用恢复码找回</button>
+  <h3>TOTP</h3>
+  <p><label for="recovery-id-input">recovery_id</label><br>
+    <input id="recovery-id-input" type="text" size="36" autocomplete="off"></p>
+  <p><label for="recovery-totp-code-input">6 位动态码</label><br>
+    <input id="recovery-totp-code-input" type="text" inputmode="numeric" pattern="[0-9]{6}"
+           maxlength="6" autocomplete="one-time-code"></p>
+  <button id="btn-recover-totp">用 TOTP 找回</button>
+</section>
+
+<p id="status" role="status"></p>
+
+<div id="identity-card" hidden>
+  <h2>已登录</h2>
+  <dl>
+    <dt>身份 (user_handle)</dt><dd id="card-handle"></dd>
+    <dt>凭据 (credential_id)</dt><dd id="card-credential"></dd>
+    <dt>密钥可同步</dt><dd id="card-backed-up"></dd>
+  </dl>
+  <p><button id="btn-manage-totp">绑定或更换 TOTP</button></p>
+</div>
+
+<section id="totp-section" hidden>
+  <h2 id="totp-title">绑定 TOTP</h2>
+  <p>请在身份验证器中手动添加以下信息，然后输入生成的 6 位动态码。</p>
+  <p>secret<br><code id="totp-secret"></code></p>
+  <p>otpauth_uri<br><code id="totp-uri"></code></p>
+  <p>recovery_id<br><code id="totp-recovery-id"></code></p>
+  <p class="note">使用 TOTP 找回时需要 recovery_id，建议妥善保存；它也会作为身份验证器中该条目的标识。</p>
+  <p><label for="totp-code-input">6 位动态码</label><br>
+    <input id="totp-code-input" type="text" inputmode="numeric" pattern="[0-9]{6}"
+           maxlength="6" autocomplete="one-time-code"></p>
+  <button id="btn-totp-confirm">确认绑定</button>
+  <button id="btn-totp-close">取消绑定</button>
+</section>
+
+<div id="code-overlay" class="overlay" hidden>
+  <div class="panel">
+    <h2>你的恢复码（只显示这一次）</h2>
+    <p>请把它<strong>抄在纸上</strong>收好。服务器只存它的哈希，我们无法再给你看第二次；
+    丢失它且没有其他可用找回方式时，身份可能无法找回。</p>
+    <code id="code-text"></code>
+    <p><label><input type="checkbox" id="code-checkbox">
+      我已经把恢复码抄在纸上，并明白丢失它的后果</label></p>
+    <button id="code-confirm" disabled>确认</button>
+  </div>
+</div>
+
+<div id="reuse-dialog" class="overlay" hidden>
+  <div class="panel">
+    <h2>沿用身份？</h2>
+    <p>刚才通过的密钥在这台设备上没有记录——它可能是从其他设备同步过来的副本。
+    要不要在这台设备上沿用这个身份？</p>
+    <p class="note">（此提示仅作告知，没有安全属性：两个选择都会继续，授权与否由服务器验证决定。）</p>
+    <p>
+      <button id="reuse-yes">沿用此身份</button>
+      <button id="reuse-no">不了，谢谢</button>
+    </p>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
