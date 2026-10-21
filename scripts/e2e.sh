@@ -3,7 +3,7 @@
 # （PoW → 注册并绑定 TOTP → confirm → 登录 → 登录后更换 TOTP → exchange →
 # 依赖方 cookie 生效 → TOTP/恢复码双找回轮换）。任何一步失败即非零退出。
 #
-# 前置：Docker（compose v2.24+，override 用了 !reset）、Go ≥ 1.26、curl。
+# 前置：Docker（compose v2.24+，override 用了 !reset）、Go ≥ 1.26、curl、openssl。
 # 独立 compose project（arauth-e2e）与独立回环端口，默认不干扰开发栈。
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -21,7 +21,9 @@ PROJECT=arauth-e2e
 COMPOSE=(docker compose -p "$PROJECT" --env-file scripts/e2e.env
 	-f docker-compose.yml -f scripts/e2e.compose.yml)
 TMP_DIR="$(mktemp -d)"
-CA_FILE="$TMP_DIR/caddy-root.crt"
+TLS_DIR="$TMP_DIR/tls"
+CA_FILE="$TLS_DIR/ca.crt"
+export E2E_TLS_DIR="$TLS_DIR"
 
 cleanup() {
 	"${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
@@ -38,7 +40,20 @@ for port in "$E2E_HTTP_PORT" "$E2E_HTTPS_PORT"; do
 	fi
 done
 
-echo "== 构建并起全栈（postgres → migrate → arauth → service-server → caddy）"
+echo "== 生成 e2e 一次性 CA 与 localhost 证书（仅本测试栈使用，跑完即销毁）"
+mkdir -p "$TLS_DIR"
+openssl genrsa -out "$TLS_DIR/ca.key" 2048 2>/dev/null
+openssl req -x509 -new -nodes -key "$TLS_DIR/ca.key" -days 1 \
+	-subj "/CN=arauth-e2e-local-ca" -out "$TLS_DIR/ca.crt"
+openssl genrsa -out "$TLS_DIR/server.key" 2048 2>/dev/null
+openssl req -new -key "$TLS_DIR/server.key" -subj "/CN=localhost" \
+	-out "$TLS_DIR/server.csr"
+openssl x509 -req -in "$TLS_DIR/server.csr" -CA "$TLS_DIR/ca.crt" \
+	-CAkey "$TLS_DIR/ca.key" -CAcreateserial -days 1 \
+	-extfile <(printf 'subjectAltName=DNS:localhost') \
+	-out "$TLS_DIR/server.crt" 2>/dev/null
+
+echo "== 构建并起全栈（postgres → migrate → arauth → service-server → nginx）"
 # GOPROXY 透传（构建期代理属区域网络形态，不写死进仓库交付物）。
 # 优先级：调用方环境变量 > 仓库根 .env > compose 默认官方代理。
 if [ -z "${GOPROXY:-}" ] && [ -f .env ]; then
@@ -60,9 +75,7 @@ for i in $(seq 1 90); do
 	sleep 1
 done
 
-echo "== 取出 Caddy 内网 CA 根证书（供 E2E 客户端信任，不用 -k 跑链路）"
-"${COMPOSE[@]}" exec -T caddy cat /data/caddy/pki/authorities/local/root.crt >"$CA_FILE"
-# sanity check：信任根证书后 HTTPS 应正常校验，且 RP 上游健康。
+echo "== 校验 TLS 信任链（客户端显式信任一次性 CA，不用 -k 跑链路）"
 curl -s --cacert "$CA_FILE" --max-time 5 "$RP_URL/health" | grep -q '"status":"ok"'
 
 echo "== 构建 e2e 客户端到临时目录"

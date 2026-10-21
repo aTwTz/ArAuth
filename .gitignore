@@ -12,7 +12,6 @@ secrets/
 /e2e/e2e
 /bin/
 /scripts/.e2e-bin/
-/scripts/.e2e-caddy-root.crt
 
 # ---- 通用构建产物（按技术栈增删）----
 dist/

@@ -28,7 +28,7 @@ type client struct {
 	cookies map[string]string // 模拟浏览器 cookie jar（按名存储）
 }
 
-// newClient 构建客户端。caFile 非空时把该 PEM（如 Caddy 内网 CA 根证书）
+// newClient 构建客户端。caFile 非空时把该 PEM（如 e2e 一次性 CA 根证书）
 // 追加进系统根证书——信任自签 CA 的正确姿势，不是 InsecureSkipVerify。
 func newClient(base, caFile string) (*client, error) {
 	roots, err := x509.SystemCertPool()

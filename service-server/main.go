@@ -107,7 +107,7 @@ func loadConfig() (*config, error) {
 		c.trustProxyHeaders = b
 	}
 
-	// 仅在可信单跳代理后开启 RP_TRUST_PROXY_HEADERS：此时 Caddy 追加的
+	// 仅在可信单跳代理后开启 RP_TRUST_PROXY_HEADERS：此时边缘 nginx 写入的
 	// XFF 末项才是客户端地址；直连形态必须保持默认 false，忽略伪造 XFF。
 
 	// RP ID 纪律示范（docs/DESIGN.md 第 8 节，与 arauth 侧配置一一对应）：
@@ -425,8 +425,8 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// clientIP 计算上行 XFF 的唯一值。信任代理时取入站 XFF 全链末项（Caddy
-// 追加的真实对端），否则取 RemoteAddr host；缺头或无法拆端口时回退原值。
+// clientIP 计算上行 XFF 的唯一值。信任代理时取入站 XFF 全链末项（nginx
+// 写入的真实对端），否则取 RemoteAddr host；缺头或无法拆端口时回退原值。
 func clientIP(r *http.Request, trustProxy bool) string {
 	if trustProxy {
 		if xff := strings.Join(r.Header.Values("X-Forwarded-For"), ","); xff != "" {

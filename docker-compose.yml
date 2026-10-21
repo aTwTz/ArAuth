@@ -46,7 +46,7 @@ services:
       ARAUTH_DSN: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       ARAUTH_SESSION_COOKIE_SECURE: "true"
       # 唯一可信上游是 service-server：它重新生成单值 X-Forwarded-For。
-      # arauth 不发布宿主端口，浏览器与 Caddy 都没有直连路由。
+      # arauth 不发布宿主端口，浏览器与边缘 nginx 都没有直连路由。
       ARAUTH_TRUST_PROXY_HEADERS: "true"
     # 不发布宿主端口；仅供 service-server 经 http://arauth:8080 内网调用。
 
@@ -64,29 +64,13 @@ services:
       RP_ID: ${ARAUTH_RPID:?missing ARAUTH_RPID in .env}
       RP_ORIGINS: ${ARAUTH_RP_ORIGINS:?missing ARAUTH_RP_ORIGINS in .env}
       RP_EXCHANGE_API_KEY: ${ARAUTH_EXCHANGE_API_KEY:?missing ARAUTH_EXCHANGE_API_KEY in .env}
-      # Caddy 是唯一可信公开上游；RP 的第一方 cookie 仅经 HTTPS 下发。
+      # 唯一可信公开上游是仓库外部署的 nginx；RP 的第一方 cookie 仅经 HTTPS 下发。
       RP_TRUST_PROXY_HEADERS: "true"
       RP_COOKIE_SECURE: "true"
-    # 不发布宿主端口；仅供 Caddy 内网反代。
-
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    depends_on:
-      - service-server
+    # 只绑回环发布，供仓库外 nginx（TLS 终结 + certbot 签证书）反代；
+    # 浏览器与 arauth 之间始终隔 RP 与 nginx 两跳。
     ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      # 名称暂保留以兼容现有 .env；语义是公共服务域名。
-      ARAUTH_DOMAIN: ${ARAUTH_DOMAIN:?missing ARAUTH_DOMAIN in .env}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./service-web:/srv/web:ro
-      - caddy_data:/data
-      - caddy_config:/config
+      - "127.0.0.1:${RP_PORT:-8081}:8081"
 
 volumes:
   postgres_data:
-  caddy_data:
-  caddy_config:

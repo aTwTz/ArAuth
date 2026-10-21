@@ -2,7 +2,7 @@
 # "hermetic、可重复、跑得快"三点。用法见 scripts/e2e.sh。
 services:
   postgres:
-    # 不发布宿主端口：e2e 全程经 Caddy 访问，宿主的 5432 可能被开发库占用。
+    # 不发布宿主端口：e2e 全程经 nginx 夹具访问，宿主的 5432 可能被开发库占用。
     ports: !reset []
 
   arauth:
@@ -27,6 +27,21 @@ services:
       ARAUTH_POW_DIFFICULTY: "18"
       ARAUTH_POW_MIN_DIFFICULTY: "18"
 
-  caddy:
+  service-server:
+    # e2e 全程经 nginx 夹具访问，不向宿主发布 RP 端口（覆盖主 compose 的回环发布）。
+    ports: !reset []
+
+  # e2e 专用最小边缘夹具：复刻生产 nginx+certbot 形态的 TLS 终结、
+  # 公开 API 白名单与静态伺服。证书由 e2e.sh 在临时目录生成（一次性 CA
+  # 签 localhost），经 E2E_TLS_DIR 挂载；跑完随 compose project 销毁。
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      - service-server
     # 独立高位回环端口：不抢占开发栈或宿主的 80/443，也不对外发布测试栈。
     ports: !override ["127.0.0.1:${E2E_HTTP_PORT:-18080}:80", "127.0.0.1:${E2E_HTTPS_PORT:-18443}:443"]
+    volumes:
+      - ./scripts/e2e.nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${E2E_TLS_DIR:?missing E2E_TLS_DIR（由 scripts/e2e.sh 生成）}:/etc/nginx/e2e-tls:ro
+      - ./service-web:/srv/web:ro
